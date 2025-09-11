@@ -5,6 +5,7 @@ from src.utils.db import fetch, insert, update
 from src.utils.auth_utils import validate_password_strength
 from google.oauth2 import id_token
 from google.auth.transport import requests
+import os
 
 # -------------------------
 # USER REGISTRATION
