@@ -7,11 +7,27 @@ from src.utils.logger import get_logger
 logger = get_logger("DB Manager")
 
 # --- Fetch documents ---
-async def fetch(collection_name: str, filter: Optional[dict] = None, limit: int = 1000) -> List[Dict]:
+# services/db.py
+async def fetch(
+    collection_name: str, 
+    filter: Optional[dict] = None, 
+    skip: int = 0,
+    limit: int = 1000, 
+    sort: Optional[List] = None,
+    projection: Optional[dict] = None
+) -> List[Dict]:
     filter = filter or {}
-    logger.info(f"Fetching from collection '{collection_name}' with filter: {filter}")
-    result = await find(collection_name, filter=filter, limit=limit)  # use fetch as find
+    logger.info(f"Fetching from collection '{collection_name}' with filter: {filter}, skip={skip}, limit={limit}")
+    result = await find(
+        collection_name,
+        filter=filter,
+        skip=skip,
+        limit=limit,
+        sort=sort,
+        projection=projection
+    )
     return result
+
 
 # --- Insert a single document ---
 async def insert(collection_name: str, data: dict) -> str:

@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Include routers
-#app.include_router(chat_routes.router, tags=["Chat"])
+app.include_router(chat_routes.router, tags=["Chat"])
 app.include_router(auth_routes.router, tags=["Authentication"]) 
 # app.include_router(location_routes.router, tags=["Locations"])
 # app.include_router(notification_routes.router, tags=["Notifications"])

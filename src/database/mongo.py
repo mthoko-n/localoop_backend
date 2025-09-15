@@ -56,13 +56,27 @@ async def get_db():
 # ---------------------
 # Helper functions
 # ---------------------
-async def fetch(collection_name: str, filter: Optional[dict] = None, limit: int = 1000, sort: Optional[List] = None, projection: Optional[dict] = None) -> List[Dict]:
+async def fetch(
+    collection_name: str, 
+    filter: Optional[dict] = None, 
+    skip: int = 0,
+    limit: int = 1000, 
+    sort: Optional[List] = None, 
+    projection: Optional[dict] = None
+) -> List[Dict]:
     filter = filter or {}
     db = await get_db()
     cursor = db[collection_name].find(filter, projection)
+
     if sort:
         cursor = cursor.sort(sort)
-    return await cursor.to_list(length=limit)
+    if skip:
+        cursor = cursor.skip(skip)
+    if limit:
+        cursor = cursor.limit(limit)
+
+    return await cursor.to_list(length=None if limit == 0 else limit)
+
 
 async def insert(collection_name: str, data: dict) -> str:
     db = await get_db()
