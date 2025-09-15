@@ -329,20 +329,17 @@ async def update_conversation_activity(conversation_id: str, activity_time: date
 
 
 async def get_user_info(user_id: str) -> Optional[Dict]:
-    """Get basic user information"""
-    try:
-        users = await fetch("users", {"id": user_id})
-        if users:
-            user = serialize_doc(users[0])
-            return {
-                "id": user.get("id"),
-                "name": user.get("name", "Unknown User"),
-                "email": user.get("email", ""),
-                "avatar_url": user.get("avatar_url")
-            }
-        return None
-    except Exception:
-        return None
+    users = await fetch("users", {"id": user_id})
+    if users:
+        user = serialize_doc(users[0])
+        return {
+            "id": user.get("id"),
+            "name": f"{user.get('display_name', '')} {user.get('last_name', '')}".strip() or "Unknown User",
+            "email": user.get("email", ""),
+            "avatar_url": user.get("avatar_url")
+        }
+    return None
+
 
 
 # -------------------------
