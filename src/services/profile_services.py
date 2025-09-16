@@ -8,6 +8,9 @@ from src.utils.serialize_helper import serialize_doc
 # -------------------------
 # GET USER PROFILE
 # -------------------------
+# -------------------------
+# GET USER PROFILE
+# -------------------------
 async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     """Get user profile information without sensitive data."""
     try:
@@ -19,14 +22,12 @@ async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
         
         user = serialize_doc(users[0])  # ✅ serialize ObjectId and datetime
         
-        # Remove sensitive information and structure the response
+        # Build profile with only existing fields
         profile = {
             "id": user.get("id") or user.get("_id"),
             "email": user["email"],
             "display_name": user.get("display_name", ""),
-            "last_name": user.get("last_name", ""),
-            "auth_provider": user.get("auth_provider", "email"),
-            "updated_at": user.get("updated_at")
+            "last_name": user.get("last_name", "")
         }
         
         return profile
@@ -145,77 +146,10 @@ async def delete_user_account(user_id: str, password: str) -> Dict[str, Any]:
         return {"success": False, "error": "Internal server error"}
 
 # -------------------------
-# GET USER LOCATIONS FOR PROFILE
-# -------------------------
-async def get_profile_user_locations(user_id: str) -> Optional[Dict[str, Any]]:
-    """Get user's location summary for profile stats."""
-    try:
-        user_locations = await fetch("user_locations", {"user_id": user_id, "is_active": True})
-        if not user_locations:
-            return {
-                "total_locations": 0,
-                "recent_locations": [],
-                "most_active_location": None
-            }
-        
-        # Serialize all locations
-        locations = [serialize_doc(loc) for loc in user_locations]
-        
-        # Sort by last activity to get most recent
-        locations.sort(key=lambda x: x.get("last_activity", x.get("joined_at")), reverse=True)
-        
-        # Get recent locations (last 5)
-        recent_locations = []
-        for loc in locations[:5]:
-            recent_locations.append({
-                "id": loc.get("id"),
-                "name": loc.get("name", "Unknown Location"),
-                "last_activity": loc.get("last_activity"),
-                "unread_count": loc.get("unread_count", 0)
-            })
-        
-        # Find most active location (highest unread count or most recent activity)
-        most_active = None
-        if locations:
-            # Sort by unread count first, then by last activity
-            most_active_loc = max(locations, 
-                                key=lambda x: (x.get("unread_count", 0), 
-                                             x.get("last_activity", x.get("joined_at"))))
-            most_active = {
-                "id": most_active_loc.get("id"),
-                "name": most_active_loc.get("name", "Unknown Location"),
-                "unread_count": most_active_loc.get("unread_count", 0)
-            }
-        
-        return {
-            "total_locations": len(locations),
-            "recent_locations": recent_locations,
-            "most_active_location": most_active
-        }
-        
-    except Exception as e:
-        print(f"Error in get_profile_user_locations: {e}")
-        return {
-            "total_locations": 0,
-            "recent_locations": [],
-            "most_active_location": None
-        }
-
-# -------------------------
 # GET USER STATISTICS
 # -------------------------
-async def get_user_locations_count(user_id: str) -> int:
-    """Get count of locations user has joined."""
-    try:
-        # Based on your location services, user_locations uses string user_id
-        user_locations = await fetch("user_locations", {"user_id": user_id, "is_active": True})
-        return len(user_locations) if user_locations else 0
-    except Exception as e:
-        print(f"Error in get_user_locations_count: {e}")
-        return 0
-
 async def get_user_stats(user_id: str) -> Dict[str, Any]:
-    """Get comprehensive user statistics."""
+    """Get user statistics with just member since date."""
     try:
         # Convert string ID to ObjectId for MongoDB query
         object_id = ObjectId(user_id)
@@ -223,33 +157,26 @@ async def get_user_stats(user_id: str) -> Dict[str, Any]:
         if not users:
             return {}
         
-        user = serialize_doc(users[0])  # ✅ serialize ObjectId and datetime
-        locations_count = await get_user_locations_count(user_id)
-        
+        user = serialize_doc(users[0])
+
         # Calculate member since date
         created_at = user.get("created_at")
         if created_at:
             if isinstance(created_at, str):
-                # If it's already a string from serialization, try to parse it
                 try:
-                    from datetime import datetime
                     dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                     member_since = dt.strftime("%B %Y")
                 except:
                     member_since = created_at[:7] if len(created_at) >= 7 else "Unknown"
             else:
-                # If it's still a datetime object
                 member_since = created_at.strftime("%B %Y")
         else:
-            # Use ObjectId creation time as fallback (since you don't have created_at field)
+            # No created_at → fallback to ObjectId’s timestamp
             creation_time = ObjectId(user["id"]).generation_time
             member_since = creation_time.strftime("%B %Y")
         
         return {
-            "locations_joined": locations_count,
-            "member_since": member_since,
-            "account_type": user.get("auth_provider", "email"),
-            "total_locations": locations_count,  # You can add more stats
+            "member_since": member_since
         }
     except Exception as e:
         print(f"Error in get_user_stats: {e}")
