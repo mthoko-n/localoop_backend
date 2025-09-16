@@ -13,5 +13,5 @@ def serialize_doc(doc: dict) -> dict:
         else:
             serialized[key] = value
     # Optionally remove internal MongoDB _id if you want
-    serialized.pop("_id", None)
+    serialized.pop("_id", None) 
     return serialized
