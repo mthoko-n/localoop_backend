@@ -45,19 +45,27 @@ class MessageResponse(BaseModel):
 # -------------------------
 @router.get("/me", response_model=ProfileResponse)
 async def get_profile(user_id: str = Depends(get_current_user)):
+    # Fetch user profile
     profile = await get_user_profile(user_id)
     if not profile:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Profile not found"
         )
 
-    # Get member_since from stats
-    stats = await get_user_stats(user_id)
-    member_since = stats.get("member_since", "Unknown")
+    # Ensure 'id' is a string for FastAPI validation
+    profile_id = profile.get("id") or str(user_id)
+    profile["id"] = str(profile_id)
 
-    # Add member_since to profile
+    # Fetch user stats safely
+    stats = await get_user_stats(user_id) or {}
+    member_since = stats.get("member_since", "Unknown")
     profile["member_since"] = member_since
+
+    # Ensure all fields exist to match ProfileResponse
+    profile.setdefault("email", "")
+    profile.setdefault("display_name", "")
+    profile.setdefault("last_name", "")
 
     return profile
 

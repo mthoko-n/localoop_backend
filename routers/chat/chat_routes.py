@@ -7,7 +7,9 @@ from src.services.chat_services import (
     create_conversation,
     get_conversation_messages,
     send_message,
-    get_conversation_by_id
+    get_conversation_by_id,
+    delete_conversation_by_id,
+    delete_message 
 )
 from src.utils.dependencies import get_current_user
 from src.services.websocket_manager import manager
@@ -53,7 +55,7 @@ class MessageSchema(BaseModel):
     reply_to_id: Optional[str] = None
 
 # -------------------------
-# REST API ROUTES (for refresh/initial loading)
+# REST API ROUTES
 # -------------------------
 
 @router.get("/locations/{location_id}/conversations", response_model=dict)
@@ -64,7 +66,6 @@ async def get_conversations(
     limit: int = 20,
     user_id: str = Depends(get_current_user)
 ):
-    """Get conversations for a location with optional category filter"""
     conversations = await get_location_conversations(
         location_id=location_id, 
         category=category, 
@@ -86,7 +87,6 @@ async def create_new_conversation(
     data: CreateConversationSchema,
     user_id: str = Depends(get_current_user)
 ):
-    """Create a new conversation in a location"""
     conversation = await create_conversation(
         location_id=location_id,
         title=data.title,
@@ -98,7 +98,6 @@ async def create_new_conversation(
     if not conversation:
         raise HTTPException(status_code=400, detail="Failed to create conversation")
     
-    # Notify WebSocket clients about new conversation
     await manager.broadcast_to_location(location_id, {
         "type": "new_conversation",
         "conversation": conversation
@@ -111,11 +110,9 @@ async def get_messages(
     conversation_id: str,
     page: int = 1,
     limit: int = 50,
-    before: Optional[str] = None,  # Message ID for cursor-based pagination
+    before: Optional[str] = None,
     user_id: str = Depends(get_current_user)
 ):
-    """Get messages for a conversation with pagination"""
-    # Verify user has access to this conversation
     conversation = await get_conversation_by_id(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -141,8 +138,6 @@ async def send_message_to_conversation(
     data: SendMessageSchema,
     user_id: str = Depends(get_current_user)
 ):
-    """Send a message to a conversation"""
-    # Verify conversation exists and user has access
     conversation = await get_conversation_by_id(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -157,13 +152,11 @@ async def send_message_to_conversation(
     if not message:
         raise HTTPException(status_code=400, detail="Failed to send message")
     
-    # Broadcast to WebSocket clients
     await manager.broadcast_to_conversation(conversation_id, {
         "type": "new_message",
         "message": message
     })
     
-    # Also notify location subscribers about conversation activity
     await manager.broadcast_to_location(conversation["location_id"], {
         "type": "conversation_activity",
         "conversation_id": conversation_id,
@@ -173,18 +166,45 @@ async def send_message_to_conversation(
     return {"message": "Message sent successfully", "data": message}
 
 # -------------------------
-# WEBSOCKET ROUTES (for real-time updates)
+# DELETE CONVERSATION
+# -------------------------
+@router.delete("/conversations/{conversation_id}", response_model=dict)
+async def delete_conversation(conversation_id: str, user_id: str = Depends(get_current_user)):
+    conversation = await get_conversation_by_id(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Delete or soft-delete the conversation
+    await delete_conversation_by_id(conversation_id, user_id=user_id)
+    
+    # Broadcast deletion to all clients in location
+    await manager.broadcast_to_location(conversation["location_id"], {
+        "type": "conversation_deleted",
+        "conversation_id": conversation_id
+    })
+    
+    return {"message": "Conversation deleted successfully"}
+
+# -------------------------
+# DELETE CHAT
+# -------------------------
+
+@router.delete("/messages/{message_id}", response_model=dict)
+async def delete_message_endpoint(message_id: str, user_id: str = Depends(get_current_user)):
+    success = await delete_message(message_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Message not found or not authorized")
+    return {"message": "Message deleted successfully"}
+# -------------------------
+# WEBSOCKET ROUTES
 # -------------------------
 
 @router.websocket("/locations/{location_id}/ws")
 async def location_websocket(websocket: WebSocket, location_id: str):
-    """WebSocket for location-level updates (new conversations, activity)"""
     await manager.connect_to_location(websocket, location_id)
     try:
         while True:
-            # Keep connection alive and handle any client messages
             data = await websocket.receive_text()
-            # Handle ping/pong or other control messages
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
@@ -192,25 +212,19 @@ async def location_websocket(websocket: WebSocket, location_id: str):
 
 @router.websocket("/conversations/{conversation_id}/ws")
 async def conversation_websocket(websocket: WebSocket, conversation_id: str):
-    """WebSocket for conversation-level updates (new messages, typing indicators)"""
     await manager.connect_to_conversation(websocket, conversation_id)
     try:
         while True:
             data = await websocket.receive_json()
-            
-            # Handle different message types
             if data.get("type") == "typing":
-                # Broadcast typing indicator to other users
                 await manager.broadcast_to_conversation(conversation_id, {
                     "type": "typing",
                     "user_id": data.get("user_id"),
                     "user_name": data.get("user_name"),
                     "is_typing": data.get("is_typing", False)
                 }, exclude_websocket=websocket)
-            
             elif data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
-                
     except WebSocketDisconnect:
         await manager.disconnect_from_conversation(websocket, conversation_id)
 
@@ -220,7 +234,6 @@ async def conversation_websocket(websocket: WebSocket, conversation_id: str):
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationSchema)
 async def get_conversation(conversation_id: str, user_id: str = Depends(get_current_user)):
-    """Get a single conversation by ID"""
     conversation = await get_conversation_by_id(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -228,7 +241,6 @@ async def get_conversation(conversation_id: str, user_id: str = Depends(get_curr
 
 @router.get("/categories", response_model=List[dict])
 async def get_conversation_categories():
-    """Get available conversation categories"""
     return [
         {"id": "water", "name": "Water", "icon": "💧", "color": "#2196F3"},
         {"id": "electricity", "name": "Electricity", "icon": "⚡", "color": "#FF9800"},

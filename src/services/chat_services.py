@@ -21,16 +21,13 @@ async def get_location_conversations(
 ) -> Optional[List[Dict]]:
     """Get conversations for a location with optional filtering"""
     
-    # Build query
     query = {"location_id": location_id, "is_active": True}
     if category and category != "all":
         query["category"] = category
     
-    # Calculate pagination
     skip = (page - 1) * limit
     
     try:
-        # Get conversations with pagination, sorted by last activity
         conversations = await fetch(
             "conversations",
             query,
@@ -45,17 +42,8 @@ async def get_location_conversations(
         formatted = []
         for conv in conversations:
             conv = serialize_doc(conv)
-            
-            # Get latest message count from messages collection
-            message_count = await count_conversation_messages(conv["id"])
-            conv["message_count"] = message_count
-            
-            # Check if user has unread messages (if user_id provided)
-            if user_id:
-                conv["is_unread"] = await has_unread_messages(conv["id"], user_id)
-            else:
-                conv["is_unread"] = False
-            
+            conv["message_count"] = await count_conversation_messages(conv["id"])
+            conv["is_unread"] = await has_unread_messages(conv["id"], user_id) if user_id else False
             formatted.append(conv)
 
         return formatted
@@ -72,9 +60,6 @@ async def create_conversation(
     category: str, 
     author_id: str
 ) -> Optional[Dict]:
-    """Create a new conversation"""
-    
-    # Get author info (you might want to fetch from users table)
     author_info = await get_user_info(author_id)
     author_name = author_info.get("name", "Unknown User") if author_info else "Unknown User"
     
@@ -99,7 +84,6 @@ async def create_conversation(
     try:
         created_id = await insert("conversations", new_conversation)
         if created_id:
-            # Return serialized conversation
             result = serialize_doc(new_conversation)
             result["message_count"] = 0
             result["is_unread"] = False
@@ -112,23 +96,18 @@ async def create_conversation(
 
 
 async def get_conversation_by_id(conversation_id: str) -> Optional[Dict]:
-    """Get a single conversation by ID"""
     try:
         conversations = await fetch("conversations", {"id": conversation_id, "is_active": True})
         if not conversations:
             return None
         
         conversation = serialize_doc(conversations[0])
-        
-        # Get message count
         conversation["message_count"] = await count_conversation_messages(conversation_id)
-        
         return conversation
 
     except Exception as e:
         logger.error(f"Error fetching conversation {conversation_id}: {e}")
         return None
-
 
 # -------------------------
 # MESSAGE SERVICES
@@ -140,24 +119,17 @@ async def get_conversation_messages(
     limit: int = 50, 
     before: Optional[str] = None
 ) -> Optional[List[Dict]]:
-    """Get messages for a conversation with pagination"""
-    
-    # Build query
     query = {"conversation_id": conversation_id}
     
-    # Cursor-based pagination if 'before' is provided
     if before:
         try:
-            # If before is a message ID, get messages before that timestamp
             before_message = await fetch("messages", {"id": before})
             if before_message:
                 before_timestamp = before_message[0]["timestamp"]
                 query["timestamp"] = {"$lt": before_timestamp}
         except Exception:
-            # If before parsing fails, use offset-based pagination
             pass
     
-    # Calculate skip for offset-based pagination
     skip = (page - 1) * limit if not before else 0
     
     try:
@@ -166,16 +138,14 @@ async def get_conversation_messages(
             query,
             skip=skip,
             limit=limit,
-            sort=[("timestamp", -1)]  # Latest first, reverse in client
+            sort=[("timestamp", -1)]
         )
         
         if not messages:
             return []
 
-        # Serialize and reverse order (oldest first for chat display)
         formatted = [serialize_doc(msg) for msg in messages]
         formatted.reverse()
-        
         return formatted
 
     except Exception as e:
@@ -189,9 +159,6 @@ async def send_message(
     author_id: str, 
     reply_to_id: Optional[str] = None
 ) -> Optional[Dict]:
-    """Send a message to a conversation"""
-    
-    # Get author info
     author_info = await get_user_info(author_id)
     author_name = author_info.get("name", "Unknown User") if author_info else "Unknown User"
     
@@ -211,28 +178,21 @@ async def send_message(
     }
 
     try:
-        # Insert message
         created_id = await insert("messages", new_message)
         if not created_id:
             return None
-        
-        # Update conversation last_activity
         await update_conversation_activity(conversation_id, now)
-        
-        # Return serialized message
         return serialize_doc(new_message)
 
     except Exception as e:
         logger.error(f"Error sending message: {e}")
         return None
 
-
 # -------------------------
 # UTILITY FUNCTIONS
 # -------------------------
 
 async def count_conversation_messages(conversation_id: str) -> int:
-    """Count messages in a conversation"""
     try:
         messages = await fetch("messages", {"conversation_id": conversation_id, "is_deleted": {"$ne": True}})
         return len(messages) if messages else 0
@@ -241,28 +201,23 @@ async def count_conversation_messages(conversation_id: str) -> int:
 
 
 async def has_unread_messages(conversation_id: str, user_id: str) -> bool:
-    """Check if user has unread messages in conversation"""
     try:
-        # Get user's last read timestamp for this conversation
         user_activity = await fetch("user_conversation_activity", {
             "user_id": user_id, 
             "conversation_id": conversation_id
         })
         
         if not user_activity:
-            # No activity record means all messages are unread
-            message_count = await count_conversation_messages(conversation_id)
-            return message_count > 0
+            return await count_conversation_messages(conversation_id) > 0
         
         last_read = user_activity[0].get("last_read")
         if not last_read:
             return True
         
-        # Check if there are messages after last read time
         recent_messages = await fetch("messages", {
             "conversation_id": conversation_id,
             "timestamp": {"$gt": last_read},
-            "author_id": {"$ne": user_id},  # Don't count own messages
+            "author_id": {"$ne": user_id},
             "is_deleted": {"$ne": True}
         })
         
@@ -274,25 +229,16 @@ async def has_unread_messages(conversation_id: str, user_id: str) -> bool:
 
 
 async def mark_conversation_read(conversation_id: str, user_id: str) -> bool:
-    """Mark conversation as read for user"""
     try:
         now = datetime.utcnow()
-        
-        # Update or insert user activity record
         existing = await fetch("user_conversation_activity", {
             "user_id": user_id, 
             "conversation_id": conversation_id
         })
-        
         if existing:
-            # Update existing record
             record_id = str(existing[0]["_id"])
-            await update("user_conversation_activity", record_id, {
-                "last_read": now,
-                "updated_at": now
-            })
+            await update("user_conversation_activity", record_id, {"last_read": now, "updated_at": now})
         else:
-            # Create new record
             await insert("user_conversation_activity", {
                 "user_id": user_id,
                 "conversation_id": conversation_id,
@@ -300,29 +246,20 @@ async def mark_conversation_read(conversation_id: str, user_id: str) -> bool:
                 "created_at": now,
                 "updated_at": now
             })
-        
         return True
-
     except Exception as e:
         logger.error(f"Error marking conversation read: {e}")
         return False
 
 
 async def update_conversation_activity(conversation_id: str, activity_time: datetime) -> bool:
-    """Update conversation's last activity time"""
     try:
         conversations = await fetch("conversations", {"id": conversation_id, "is_active": True})
         if not conversations:
             return False
-        
         record_id = str(conversations[0]["_id"])
-        await update("conversations", record_id, {
-            "last_activity": activity_time,
-            "updated_at": activity_time
-        })
-        
+        await update("conversations", record_id, {"last_activity": activity_time, "updated_at": activity_time})
         return True
-
     except Exception as e:
         logger.error(f"Error updating conversation activity: {e}")
         return False
@@ -333,7 +270,6 @@ async def get_user_info(user_id: str) -> Optional[Dict]:
         users = await fetch("users", {"_id": ObjectId(user_id)})
     except Exception:
         return None
-
     if users:
         user = serialize_doc(users[0])
         return {
@@ -344,13 +280,11 @@ async def get_user_info(user_id: str) -> Optional[Dict]:
         }
     return None
 
-
-
 # -------------------------
 # ADMIN/MODERATION FUNCTIONS
 # -------------------------
 
-async def delete_conversation(conversation_id: str, user_id: str) -> bool:
+async def delete_conversation_by_id(conversation_id: str, user_id: str) -> bool:
     """Soft delete a conversation (mark as inactive)"""
     try:
         conversations = await fetch("conversations", {"id": conversation_id, "author_id": user_id, "is_active": True})
@@ -362,29 +296,20 @@ async def delete_conversation(conversation_id: str, user_id: str) -> bool:
             "is_active": False,
             "deleted_at": datetime.utcnow()
         })
-        
         return True
-
     except Exception as e:
         logger.error(f"Error deleting conversation: {e}")
         return False
 
 
 async def delete_message(message_id: str, user_id: str) -> bool:
-    """Soft delete a message"""
     try:
         messages = await fetch("messages", {"id": message_id, "author_id": user_id, "is_deleted": {"$ne": True}})
         if not messages:
             return False
-        
         record_id = str(messages[0]["_id"])
-        await update("messages", record_id, {
-            "is_deleted": True,
-            "deleted_at": datetime.utcnow()
-        })
-        
+        await update("messages", record_id, {"is_deleted": True, "deleted_at": datetime.utcnow()})
         return True
-
     except Exception as e:
         logger.error(f"Error deleting message: {e}")
         return False

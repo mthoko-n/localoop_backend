@@ -5,26 +5,22 @@ from src.utils.db import fetch, update, delete
 from src.utils.auth_utils import verify_password, hash_password, validate_password_strength
 from src.utils.serialize_helper import serialize_doc
 
-# -------------------------
-# GET USER PROFILE
-# -------------------------
+
 # -------------------------
 # GET USER PROFILE
 # -------------------------
 async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     """Get user profile information without sensitive data."""
     try:
-        # Convert string ID to ObjectId for MongoDB query
         object_id = ObjectId(user_id)
         users = await fetch("users", {"_id": object_id})
         if not users:
             return None
         
         user = serialize_doc(users[0])  # ✅ serialize ObjectId and datetime
-        
-        # Build profile with only existing fields
+
         profile = {
-            "id": user.get("id") or user.get("_id"),
+            "id": str(user.get("id") or user.get("_id")),  # ✅ always string
             "email": user["email"],
             "display_name": user.get("display_name", ""),
             "last_name": user.get("last_name", "")
@@ -34,6 +30,7 @@ async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         print(f"Error in get_user_profile: {e}")
         return None
+
 
 # -------------------------
 # UPDATE USER PROFILE
@@ -148,36 +145,23 @@ async def delete_user_account(user_id: str, password: str) -> Dict[str, Any]:
 # -------------------------
 # GET USER STATISTICS
 # -------------------------
-async def get_user_stats(user_id: str) -> Dict[str, Any]:
-    """Get user statistics with just member since date."""
+async def get_user_stats(user: dict) -> Optional[Dict[str, Any]]:
     try:
-        # Convert string ID to ObjectId for MongoDB query
-        object_id = ObjectId(user_id)
-        users = await fetch("users", {"_id": object_id})
-        if not users:
-            return {}
-        
-        user = serialize_doc(users[0])
+        user_id = str(user.get("id") or user.get("_id"))
 
-        # Calculate member since date
-        created_at = user.get("created_at")
-        if created_at:
-            if isinstance(created_at, str):
-                try:
-                    dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    member_since = dt.strftime("%B %Y")
-                except:
-                    member_since = created_at[:7] if len(created_at) >= 7 else "Unknown"
-            else:
-                member_since = created_at.strftime("%B %Y")
-        else:
-            # No created_at → fallback to ObjectId’s timestamp
-            creation_time = ObjectId(user["id"]).generation_time
-            member_since = creation_time.strftime("%B %Y")
-        
-        return {
-            "member_since": member_since
+        # Fetch messages for this user
+        messages = await fetch("messages", {"author_id": user_id})
+
+        # Sort messages by timestamp ascending (optional, if fetch doesn't guarantee order)
+        messages.sort(key=lambda m: m["timestamp"])
+
+        stats = {
+            "id": user_id,
+            "total_messages": len(messages),
+            "last_activity": messages[-1]["timestamp"] if messages else None
         }
+
+        return stats
     except Exception as e:
         print(f"Error in get_user_stats: {e}")
-        return {}
+        return None
