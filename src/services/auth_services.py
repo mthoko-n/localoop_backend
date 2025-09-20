@@ -1,5 +1,6 @@
 from typing import Optional
 from bson import ObjectId
+from dotenv import load_dotenv  # Add this import
 from src.utils.auth_utils import hash_password, verify_password, generate_token_pair, decode_refresh_token
 from src.utils.db import fetch, insert, update
 from src.utils.auth_utils import validate_password_strength
@@ -8,6 +9,9 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
 from src.utils.logger import get_logger
+
+# Load environment variables
+load_dotenv()  
 
 logger = get_logger("DB Manager")
 
@@ -75,8 +79,6 @@ async def authenticate_user(email: str, password: str) -> Optional[dict]:
         return None  # Wrong password
 
     user_id = str(user["_id"])
-    # then in your authenticate_user
-    
         
     # Generate token pair
     tokens = generate_token_pair(user_id, email)
@@ -120,37 +122,52 @@ async def update_display_name(user_id: str, new_display_name: str) -> bool:
 # -------------------------
 async def authenticate_google_user(id_token_str: str) -> dict:
     """Verify Google ID token, create/find user, return token pair."""
-    id_info = id_token.verify_oauth2_token(
-        id_token_str, requests.Request(), os.getenv("GOOGLE_CLIENT_ID")
-    )
-    email = id_info.get("email")
-    google_id = id_info.get("sub")
-    display_name = id_info.get("name")
+    try:
+        # Add some logging to debug
+        google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+        logger.info(f"Using Google Client ID: {google_client_id[:10]}..." if google_client_id else "No GOOGLE_CLIENT_ID found")
+        
+        id_info = id_token.verify_oauth2_token(
+            id_token_str, requests.Request(), google_client_id
+        )
+        
+        email = id_info.get("email")
+        google_id = id_info.get("sub")
+        display_name = id_info.get("name")
 
-    # Only consider active users
-    users = await fetch("users", {"email": email, "is_active": {"$ne": False}})
-    if not users:
-        user_doc = {
-            "email": email,
-            "google_id": google_id,
-            "display_name": display_name,
-            "auth_provider": "google",
-            "is_active": True,   
-            "deleted_at": None   
-        }
-        user_id = await insert("users", user_doc)
-        user_id = str(user_id)
-    else:
-        user_id = str(users[0]["_id"])
+        logger.info(f"Google auth successful for email: {email}")
 
-    # Generate token pair
-    tokens = generate_token_pair(user_id, email)
-    
-    # Store refresh token
-    refresh_payload = decode_refresh_token(tokens["refresh_token"])
-    jti = refresh_payload.get("jti")
-    
-    if jti:
-        await store_refresh_token(user_id, tokens["refresh_token"], jti)
-    
-    return tokens
+        # Only consider active users
+        users = await fetch("users", {"email": email, "is_active": {"$ne": False}})
+        if not users:
+            user_doc = {
+                "email": email,
+                "google_id": google_id,
+                "display_name": display_name,
+                "auth_provider": "google",
+                "is_active": True,   
+                "deleted_at": None   
+            }
+            user_id = await insert("users", user_doc)
+            user_id = str(user_id)
+            logger.info(f"Created new Google user with ID: {user_id}")
+        else:
+            user_id = str(users[0]["_id"])
+            logger.info(f"Found existing user with ID: {user_id}")
+
+        # Generate token pair
+        tokens = generate_token_pair(user_id, email)
+        
+        # Store refresh token
+        refresh_payload = decode_refresh_token(tokens["refresh_token"])
+        jti = refresh_payload.get("jti")
+        
+        if jti:
+            await store_refresh_token(user_id, tokens["refresh_token"], jti)
+        
+        logger.info("Google authentication completed successfully")
+        return tokens
+        
+    except Exception as e:
+        logger.error(f"Google authentication error: {str(e)}")
+        raise

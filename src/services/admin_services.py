@@ -259,14 +259,24 @@ async def get_system_metrics(admin_user_id: str) -> Dict[str, Any]:
         except:
             total_locations = active_locations = unique_location_count = 0
         
-        # Session metrics
+        # Session metrics - FIXED: Count unique users instead of total tokens
         try:
-            active_sessions = len(await fetch("refresh_tokens", {
+            active_tokens = await fetch("refresh_tokens", {
                 "is_revoked": False,
                 "expires_at": {"$gt": datetime.utcnow()}
-            }))
+            })
+            
+            # Count unique users instead of total tokens
+            unique_active_users = set()
+            for token in active_tokens:
+                unique_active_users.add(str(token["user_id"]))
+            
+            total_sessions = len(active_tokens)
+            online_users = len(unique_active_users)
+            
         except:
-            active_sessions = 0
+            total_sessions = 0
+            online_users = 0
         
         # Recent activity (users created in last 7 days)
         week_ago = datetime.utcnow() - timedelta(days=7)
@@ -299,7 +309,9 @@ async def get_system_metrics(admin_user_id: str) -> Dict[str, Any]:
                     "unique_locations": unique_location_count
                 },
                 "sessions": {
-                    "active_sessions": active_sessions
+                    "total_active_sessions": total_sessions,
+                    "active_sessions": online_users,  # This is the accurate count you want
+                    "avg_sessions_per_user": round(total_sessions / max(online_users, 1), 1)
                 }
             }
         }
