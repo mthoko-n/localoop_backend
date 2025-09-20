@@ -7,6 +7,9 @@ from src.services.refresh_token_services import store_refresh_token
 from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
+from src.utils.logger import get_logger
+
+logger = get_logger("DB Manager")
 
 # -------------------------
 # USER REGISTRATION
@@ -72,7 +75,9 @@ async def authenticate_user(email: str, password: str) -> Optional[dict]:
         return None  # Wrong password
 
     user_id = str(user["_id"])
+    # then in your authenticate_user
     
+        
     # Generate token pair
     tokens = generate_token_pair(user_id, email)
     

@@ -24,14 +24,14 @@ async def get_user_profile(user_id: str) -> Optional[Dict[str, Any]]:
             "email": user["email"],
             "display_name": user.get("display_name", ""),
             "last_name": user.get("last_name", ""),
-            "hasPassword": "password" in user  # <--- key to indicate if user has password
+            "hasPassword": "password" in user,
+            "is_admin": user.get("is_admin", False)  # Add this line
         }
         
         return profile
     except Exception as e:
         print(f"Error in get_user_profile: {e}")
         return None
-
 # -------------------------
 # UPDATE USER PROFILE
 # -------------------------

@@ -40,6 +40,7 @@ class ProfileResponse(BaseModel):
     display_name: str
     last_name: str
     hasPassword: bool
+    is_admin: bool = False  
     # Optional: Add more fields if needed
     total_messages: Optional[int] = None
     last_activity: Optional[str] = None
