@@ -78,7 +78,11 @@ async def create_conversation(
         "last_activity": now,
         "is_active": True,
         "is_pinned": False,
-        "view_count": 0
+        "view_count": 0,
+        # NEW: Report tracking fields
+        "report_count": 0,
+        "is_flagged": False,
+        "last_reported_at": None
     }
 
     try:
@@ -174,7 +178,11 @@ async def send_message(
         "timestamp": now,
         "is_edited": False,
         "reply_to_id": reply_to_id,
-        "is_deleted": False
+        "is_deleted": False,
+        # NEW: Report tracking fields
+        "report_count": 0,
+        "is_flagged": False,
+        "last_reported_at": None
     }
 
     try:
@@ -187,6 +195,60 @@ async def send_message(
     except Exception as e:
         logger.error(f"Error sending message: {e}")
         return None
+
+# -------------------------
+# NEW: REPORT HELPER FUNCTIONS
+# -------------------------
+
+async def get_message_by_id(message_id: str) -> Optional[Dict]:
+    """Get a message by ID for reporting purposes"""
+    try:
+        messages = await fetch("messages", {"id": message_id, "is_deleted": {"$ne": True}})
+        if not messages:
+            return None
+        return serialize_doc(messages[0])
+    except Exception as e:
+        logger.error(f"Error fetching message {message_id}: {e}")
+        return None
+
+async def increment_report_count(target_type: str, target_id: str) -> bool:
+    """Increment report count for conversation or message"""
+    try:
+        collection = "conversations" if target_type == "conversation" else "messages"
+        
+        # Get current document
+        docs = await fetch(collection, {"id": target_id})
+        if not docs:
+            return False
+        
+        doc = docs[0]
+        record_id = str(doc["_id"])
+        
+        # Increment report count and set last reported time
+        updates = {
+            "report_count": doc.get("report_count", 0) + 1,
+            "last_reported_at": datetime.utcnow()
+        }
+        
+        # Auto-flag if report count reaches threshold
+        if updates["report_count"] >= 3:
+            updates["is_flagged"] = True
+            logger.warning(f"{target_type.title()} {target_id} auto-flagged due to {updates['report_count']} reports")
+        
+        await update(collection, record_id, updates)
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error incrementing report count for {target_type} {target_id}: {e}")
+        return False
+
+async def get_user_display_name(user_id: str) -> str:
+    """Get user display name for reports"""
+    try:
+        user_info = await get_user_info(user_id)
+        return user_info.get("name", "Unknown User") if user_info else "Unknown User"
+    except Exception:
+        return "Unknown User"
 
 # -------------------------
 # UTILITY FUNCTIONS

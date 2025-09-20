@@ -7,6 +7,7 @@ from routers.profile import profile_routes
 from src.database.mongo import connect_to_mongo, close_mongo_connection
 from routers.location_search import user_location
 from routers.admin import admin_routes
+from routers.reports import report_routes
 
 # Lifespan function to manage MongoDB connection
 async def lifespan(app: FastAPI):
@@ -33,3 +34,4 @@ app.include_router(auth_routes.router, tags=["Authentication"])
 app.include_router(profile_routes.router, tags=["Profile"])
 app.include_router(user_location.router, tags=["User Locations"])
 app.include_router(admin_routes.router, tags=["Admin"])
+app.include_router(report_routes.router, tags=["Reports"])  
